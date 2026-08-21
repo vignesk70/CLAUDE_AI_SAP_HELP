@@ -11,7 +11,19 @@ class Settings(BaseSettings):
     host: str = Field(default="0.0.0.0", description="Server host")
     port: int = Field(default=8000, description="Server port")
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    mongodb_uri: str = Field(
+        default="mongodb://localhost:27017/claude_sap_ai",
+        description="MongoDB connection string",
+    )
+    mongodb_database: str = Field(
+        default="claude_sap_ai", description="MongoDB database name"
+    )
+    sap_help_search_url: str = Field(
+        default="https://help.sap.com/http.svc/elasticsearch",
+        description="SAP Help Portal search endpoint used to seed the help collection",
+    )
+
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 settings = Settings()
