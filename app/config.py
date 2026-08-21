@@ -10,6 +10,15 @@ class Settings(BaseSettings):
     max_tokens: int = Field(default=16000, description="Maximum tokens per response")
     host: str = Field(default="0.0.0.0", description="Server host")
     port: int = Field(default=8000, description="Server port")
+    cors_origins: list[str] = Field(
+        default=[
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:3003",
+            "http://127.0.0.1:3003",
+        ],
+        description="Origins allowed to call this API (Nuxt frontend dev server)",
+    )
 
     mongodb_uri: str = Field(
         default="mongodb://localhost:27017/claude_sap_ai",

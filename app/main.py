@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.db.mongo import close_client, ensure_help_indexes
@@ -34,6 +35,15 @@ app = FastAPI(
     description="AI-powered SAP support assistant powered by Claude",
     version="0.2.0",
     lifespan=lifespan,
+)
+
+# Allow the Nuxt frontend (dev server) to call this API from the browser
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.include_router(chat_router)
