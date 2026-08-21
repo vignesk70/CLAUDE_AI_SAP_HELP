@@ -141,23 +141,120 @@ The API will be available at `http://localhost:8000`.
 
 **Interactive API docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
 
-**Example request:**
+## API
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/api/help/ask` | Ask a question — Claude routes, the `help` collection grounds the answer |
+| `POST` | `/api/chat` | Raw Claude pass-through, no retrieval |
+| `GET`  | `/api/help/search` | Full-text search the corpus directly |
+| `GET`  | `/api/help/documents` | Page through topics (`product_id`, `document_type`, `skip`, `limit`) |
+| `GET`  | `/api/help/documents/{id}` | One topic by `<loio>:<language>` |
+| `GET`  | `/api/help/products` | Product facet counts |
+| `GET`  | `/api/help/stats` | Corpus size plus product and document-type facets |
+| `GET`  | `/api/health` | API, database, and corpus status |
+
+### How `/api/help/ask` works
+
+```
+question
+  |- ClaudeService.triage -----------------> HelpTriage (structured)
+       needed_for_help_input = false -----> return triage.direct_answer, done
+       needed_for_help_input = true  -----> HelpRepository.search_many(triage.search_queries)
+                                              no hits --> say so + print the seed command
+                                              hits -----> ClaudeService.answer_from_documents
+                                                            |-> GroundedAnswer (structured)
+```
+
+Claude never sees the database and never writes free-form JSON. Both passes use
+`client.messages.parse(output_format=...)`, so the Pydantic models in
+[app/models/chat.py](app/models/chat.py) *are* the schema Claude must satisfy:
+`HelpTriage` for the routing decision, `GroundedAnswer` for the cited answer.
+
+Two retrieval details worth knowing:
+
+- **Products boost, they do not filter.** Claude names SAP products freely, and a
+  wrong guess used as a hard `AND` returns confidently irrelevant documents. A
+  product match multiplies the text score instead (`PRODUCT_BOOST`). `rank_score`
+  in the response is the boosted score, and it is what ordering uses.
+- **A relevance floor is applied.** MongoDB `$text` OR-matches every term, so weak
+  hits are always present. Merged results scoring below `RELEVANCE_FLOOR` of the
+  best hit are dropped. `GET /api/help/search` skips both behaviours — its
+  `product` filter is a real filter, because it comes from the caller rather than
+  from the model.
+
+**Ask:**
 
 ```bash
-curl -X POST http://localhost:8000/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{
-    "messages": [
-      {"role": "user", "content": "How do I check the status of a background job in SAP?"}
+curl -X POST http://localhost:8000/api/help/ask   -H "Content-Type: application/json"   -d '{"question": "How do I analyse a short dump in ABAP?", "max_documents": 4}'
+```
+
+```json
+{
+  "question": "How do I analyse a short dump in ABAP?",
+  "needed_for_help_input": true,
+  "reasoning": "Short dump analysis is an SAP-specific procedure...",
+  "search_queries": ["short dump analysis ABAP", "ST22 transaction"],
+  "answer": "To analyse a short dump you use the ABAP Dump Analysis tool, transaction ST22...",
+  "citations": [
+    {"loio": "4b6d5f", "title": "ABAP Dump Analysis (ST22)", "url": "https://help.sap.com/docs/..."}
+  ],
+  "confidence": "medium",
+  "followup_questions": ["How do I keep a dump beyond the retention period?"],
+  "retrieved_documents": [
+    {
+      "id": "4b6d5f:en-US",
+      "loio": "4b6d5f",
+      "title": "ABAP Dump Analysis",
+      "url": "https://help.sap.com/docs/...",
+      "product": "ABAP platform",
+      "score": 6.11,
+      "rank_score": 9.77,
+      "matched_query": "short dump analysis ABAP"
+    }
+  ],
+  "model": "claude-opus-5"
+}
+```
+
+`confidence` is `low` when the retrieved documents do not cover the question — the
+answer then says what is missing instead of filling the gap with unsourced recall.
+
+**Conversation turns** — prior turns go in `history` and are forwarded to both
+Claude passes:
+
+```bash
+curl -X POST http://localhost:8000/api/help/ask   -H "Content-Type: application/json"   -d '{
+    "question": "And how do I keep one for longer?",
+    "history": [
+      {"role": "user", "content": "How do I analyse a short dump?"},
+      {"role": "assistant", "content": "Use transaction ST22."}
     ]
   }'
 ```
 
-**Health check:**
+**Raw chat (no retrieval):**
 
 ```bash
+curl -X POST http://localhost:8000/api/chat   -H "Content-Type: application/json"   -d '{"messages": [{"role": "user", "content": "What is transaction SM37?"}]}'
+```
+
+**Direct search and health:**
+
+```bash
+curl "http://localhost:8000/api/help/search?q=CDS+view+entity&limit=5"
 curl http://localhost:8000/api/health
 ```
+
+## Testing
+
+```bash
+python -m unittest discover -s tests -t .
+```
+
+The repository tests run against a throwaway `claude_sap_ai_test` database and skip
+themselves when MongoDB is unreachable. Everything else is offline: Claude and Mongo
+are replaced with stubs via FastAPI dependency overrides.
 
 ## Project Structure
 
@@ -167,19 +264,25 @@ Claude_SupportSAP_AI/
 │   ├── main.py                 # Application entry point
 │   ├── config.py               # Settings & environment config
 │   ├── routers/
-│   │   └── chat.py             # Chat & health API endpoints
+│   │   ├── chat.py             # Chat & health endpoints
+│   │   └── help.py             # Ask + corpus endpoints
+│   ├── dependencies.py         # FastAPI dependency providers
 │   ├── services/
-│   │   └── claude_service.py   # Claude API integration
+│   │   ├── claude_service.py   # Claude calls: chat, triage, grounded answer
+│   │   └── help_assistant.py   # Ask orchestration: triage → retrieve → answer
+│   ├── repositories/
+│   │   └── help_repository.py  # Every `help` collection query lives here
 │   ├── db/
-│   │   └── mongo.py            # MongoDB clients & index setup
+│   │   └── mongo.py            # Async Mongo client & index setup
 │   └── models/
-│       └── help.py             # `help` collection schema
+│       ├── help.py             # `help` collection schema
+│       └── chat.py             # Ask I/O + the schemas Claude must return
 ├── scripts/
 │   ├── fetch_sap_help.py       # Harvest topics from help.sap.com
 │   └── seed_help.py            # Seed / re-seed the `help` collection
 ├── data/
 │   └── help_seed.json          # Committed seed fixture
-├── tests/                      # Unit tests (python -m unittest discover -s tests)
+├── tests/                      # Unit + repository integration tests
 ├── frontend/                   # Frontend (planned)
 ├── requirements.txt            # Python dependencies
 ├── .env.example                # Environment variable template
