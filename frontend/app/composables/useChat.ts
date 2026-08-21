@@ -29,7 +29,7 @@ export function useChat() {
 
     try {
       const payload = messages.value.map((m) => ({ role: m.role, content: m.content }))
-      const res = await $fetch<{ reply: string }>(`${config.public.apiBase}/api/chat`, {
+      const res = await $fetch<{ reply: string }>(`${config.public.apiBase}/api/help/ask`, {
         method: 'POST',
         body: { messages: payload }
       })
