@@ -27,7 +27,7 @@ useHead({ title: 'Claude Support SAP AI' })
         <EmptyState v-if="messages.length === 0" @select="send" />
 
         <div v-else class="space-y-5">
-          <ChatMessage v-for="m in messages" :key="m.id" :message="m" />
+          <ChatMessage v-for="m in messages" :key="m.id" :message="m" @followup="send" />
           <TypingIndicator v-if="isLoading" />
         </div>
 

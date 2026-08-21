@@ -29,5 +29,29 @@ export default defineNuxtConfig({
   colorMode: {
     preference: 'dark',
     fallback: 'dark'
+  },
+
+  // Bundle every icon we use into the client so glyphs render without a
+  // network round-trip (Nuxt Icon only auto-bundles its own internal icons).
+  icon: {
+    serverBundle: 'local',
+    clientBundle: {
+      icons: [
+        'lucide:bot',
+        'lucide:plus',
+        'lucide:moon',
+        'lucide:sun',
+        'lucide:send',
+        'lucide:book-open',
+        'lucide:arrow-up-right',
+        'lucide:corner-down-right',
+        'lucide:list-checks',
+        'lucide:code',
+        'lucide:database',
+        'lucide:wrench',
+        'lucide:triangle-alert'
+      ],
+      sizeLimitKb: 0
+    }
   }
 })
