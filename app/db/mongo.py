@@ -1,45 +1,57 @@
 """MongoDB access layer.
 
-Exposes a lazily-created synchronous client (used by CLI tooling such as the
-seeder) and an async client (used by the FastAPI request handlers).
+One async client per event loop. `AsyncMongoClient` binds to the loop it was
+created on and raises if reused from another, so the cache is keyed by loop
+rather than being a plain singleton — a web server has one loop, but the seeder
+(`asyncio.run`) and the test suite each create their own.
 """
 
 from __future__ import annotations
 
-from functools import lru_cache
+import asyncio
 
-from pymongo import AsyncMongoClient, MongoClient
+from pymongo import AsyncMongoClient
 from pymongo.asynchronous.database import AsyncDatabase
-from pymongo.database import Database
 
 from app.config import settings
 
 HELP_COLLECTION = "help"
 
 
-@lru_cache(maxsize=1)
-def get_client() -> MongoClient:
-    """Return a process-wide synchronous MongoClient."""
-    return MongoClient(settings.mongodb_uri, serverSelectionTimeoutMS=5000)
+_clients: dict[int, AsyncMongoClient] = {}
 
 
-@lru_cache(maxsize=1)
-def get_async_client() -> AsyncMongoClient:
-    """Return a process-wide asynchronous MongoClient."""
-    return AsyncMongoClient(settings.mongodb_uri, serverSelectionTimeoutMS=5000)
+def _loop_key() -> int:
+    """Identify the running loop; 0 when called outside one."""
+    try:
+        return id(asyncio.get_running_loop())
+    except RuntimeError:
+        return 0
 
 
-def get_database() -> Database:
-    """Return the configured database via the synchronous client."""
+def get_client() -> AsyncMongoClient:
+    """Return the async MongoClient bound to the current event loop."""
+    key = _loop_key()
+    client = _clients.get(key)
+    if client is None:
+        client = AsyncMongoClient(settings.mongodb_uri, serverSelectionTimeoutMS=5000)
+        _clients[key] = client
+    return client
+
+
+def get_database() -> AsyncDatabase:
+    """Return the configured database."""
     return get_client()[settings.mongodb_database]
 
 
-def get_async_database() -> AsyncDatabase:
-    """Return the configured database via the asynchronous client."""
-    return get_async_client()[settings.mongodb_database]
+async def close_client() -> None:
+    """Close and forget this loop's client (app shutdown, end of a seed run)."""
+    client = _clients.pop(_loop_key(), None)
+    if client is not None:
+        await client.close()
 
 
-def ensure_help_indexes(database: Database | None = None) -> list[str]:
+async def ensure_help_indexes(database: AsyncDatabase | None = None) -> list[str]:
     """Create the indexes the `help` collection relies on. Idempotent.
 
     Returns:
@@ -47,10 +59,10 @@ def ensure_help_indexes(database: Database | None = None) -> list[str]:
     """
     db = database if database is not None else get_database()
     collection = db[HELP_COLLECTION]
-    collection.create_index([("loio", 1), ("language", 1)], name="loio_language")
-    collection.create_index("product_id", name="product_id")
-    collection.create_index("document_type", name="document_type")
-    collection.create_index(
+    await collection.create_index([("loio", 1), ("language", 1)], name="loio_language")
+    await collection.create_index("product_id", name="product_id")
+    await collection.create_index("document_type", name="document_type")
+    await collection.create_index(
         [("title", "text"), ("description", "text"), ("snippet", "text")],
         name="help_fulltext",
         default_language="english",
@@ -58,4 +70,4 @@ def ensure_help_indexes(database: Database | None = None) -> list[str]:
         # language override, so point the override at an unused field name.
         language_override="text_language",
     )
-    return sorted(collection.index_information())
+    return sorted(await collection.index_information())

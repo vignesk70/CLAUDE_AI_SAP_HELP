@@ -5,20 +5,20 @@
     python -m scripts.seed_help --drop          # wipe the collection, then seed
 
 Seeding is idempotent: each document's `_id` is `<loio>:<language>`, so a rerun
-updates in place instead of duplicating.
+updates in place instead of duplicating. Writes go through `HelpRepository`, the
+same code path the API uses.
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 
-from pymongo import UpdateOne
-
-from app.db.mongo import HELP_COLLECTION, ensure_help_indexes, get_database
+from app.db.mongo import close_client
 from app.models.help import HelpDocument
+from app.repositories.help_repository import HelpRepository
 from scripts.fetch_sap_help import DEFAULT_QUERIES, fetch, write_fixture
 
 FIXTURE_PATH = Path("data/help_seed.json")
@@ -34,39 +34,36 @@ def load_fixture(path: Path) -> list[HelpDocument]:
     return [HelpDocument.model_validate(item) for item in payload["documents"]]
 
 
-def upsert(documents: list[HelpDocument], drop: bool = False) -> dict[str, int]:
+async def seed(documents: list[HelpDocument], drop: bool = False) -> dict[str, int]:
     """Upsert documents into the `help` collection and report what changed."""
-    database = get_database()
-    collection = database[HELP_COLLECTION]
-
+    repository = HelpRepository()
     if drop:
-        collection.drop()
+        await repository.drop()
+    return await repository.upsert_many(documents)
 
-    ensure_help_indexes(database)
 
-    if not documents:
-        return {"matched": 0, "inserted": 0, "modified": 0, "total": 0}
+async def run(args: argparse.Namespace) -> None:
+    if args.refresh:
+        queries = args.queries or list(DEFAULT_QUERIES)
+        print(f"Refreshing fixture from help.sap.com ({len(queries)} queries)")
+        documents = await asyncio.to_thread(fetch, queries, args.limit)
+        if not documents:
+            raise SystemExit("Refresh returned no documents; fixture left untouched.")
+        write_fixture(documents, args.fixture)
+        print(f"Wrote {len(documents)} topics to {args.fixture}")
+    else:
+        documents = load_fixture(args.fixture)
+        print(f"Loaded {len(documents)} topics from {args.fixture}")
 
-    now = datetime.now(timezone.utc)
-    operations = []
-    for doc in documents:
-        record = doc.model_dump(by_alias=True)
-        doc_id = record.pop("_id")
-        operations.append(
-            UpdateOne(
-                {"_id": doc_id},
-                {"$set": {**record, "seeded_at": now}},
-                upsert=True,
-            )
-        )
+    try:
+        stats = await seed(documents, drop=args.drop)
+    finally:
+        await close_client()
 
-    result = collection.bulk_write(operations, ordered=False)
-    return {
-        "matched": result.matched_count,
-        "inserted": len(result.upserted_ids),
-        "modified": result.modified_count,
-        "total": collection.count_documents({}),
-    }
+    print(
+        f"help collection: inserted={stats['inserted']} "
+        f"updated={stats['modified']} total={stats['total']}"
+    )
 
 
 def main() -> None:
@@ -84,25 +81,7 @@ def main() -> None:
     parser.add_argument(
         "--query", action="append", dest="queries", help="Override query list on --refresh"
     )
-    args = parser.parse_args()
-
-    if args.refresh:
-        queries = args.queries or list(DEFAULT_QUERIES)
-        print(f"Refreshing fixture from help.sap.com ({len(queries)} queries)")
-        documents = fetch(queries, limit=args.limit)
-        if not documents:
-            raise SystemExit("Refresh returned no documents; fixture left untouched.")
-        write_fixture(documents, args.fixture)
-        print(f"Wrote {len(documents)} topics to {args.fixture}")
-    else:
-        documents = load_fixture(args.fixture)
-        print(f"Loaded {len(documents)} topics from {args.fixture}")
-
-    stats = upsert(documents, drop=args.drop)
-    print(
-        f"help collection: inserted={stats['inserted']} "
-        f"updated={stats['modified']} total={stats['total']}"
-    )
+    asyncio.run(run(parser.parse_args()))
 
 
 if __name__ == "__main__":
