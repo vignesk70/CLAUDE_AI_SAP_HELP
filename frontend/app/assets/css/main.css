@@ -1,0 +1,87 @@
+@import "tailwindcss";
+@import "@nuxt/ui";
+
+/* ------------------------------------------------------------------ */
+/* Design system tokens for Claude Support SAP AI                      */
+/* Override Nuxt UI / Tailwind v4 theme with a Claude-inspired palette */
+/* ------------------------------------------------------------------ */
+@theme static {
+  /* Primary — warm coral inspired by Claude/Anthropic */
+  --color-primary-50: #fdf3f2;
+  --color-primary-100: #fbe5e3;
+  --color-primary-200: #f7cfcb;
+  --color-primary-300: #f0aca6;
+  --color-primary-400: #e57f76;
+  --color-primary-500: #d95d53;
+  --color-primary-600: #c2443a;
+  --color-primary-700: #a3372f;
+  --color-primary-800: #87322c;
+  --color-primary-900: #742e2a;
+  --color-primary-950: #571f1c;
+
+  /* Typography */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+:root {
+  --transition-smooth: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Reusable component classes — all colors reference design tokens.    */
+/* ------------------------------------------------------------------ */
+@layer components {
+  .bubble-user {
+    background-color: var(--color-primary-600);
+    color: var(--ui-text-inverted);
+    border-radius: 1rem;
+    border-top-right-radius: 0.375rem;
+  }
+
+  .bubble-assistant {
+    background-color: var(--ui-bg-elevated);
+    color: var(--ui-text);
+    border: 1px solid var(--ui-border-muted);
+    border-radius: 1rem;
+    border-top-left-radius: 0.375rem;
+  }
+
+  .suggestion-chip {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 0.75rem;
+    border-radius: 0.75rem;
+    border: 1px solid var(--ui-border-muted);
+    background-color: var(--ui-bg-muted);
+    color: var(--ui-text);
+    font-size: 0.8125rem;
+    line-height: 1.375rem;
+    text-align: left;
+    cursor: pointer;
+    transition: var(--transition-smooth);
+  }
+  .suggestion-chip:hover {
+    border-color: var(--color-primary-500);
+    background-color: var(--ui-bg-elevated);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Scrollbar polish                                                    */
+/* ------------------------------------------------------------------ */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+}
